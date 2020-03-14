@@ -17,7 +17,7 @@ pub type Int = u32;
 ///   `PartialOrd`)
 ///
 /// * Study optimizations from theory of finite groups, and apply some of them!
-mod modular {
+pub mod modular {
     use super::primes::is_prime;
     use super::Int;
     use std::cmp::PartialEq;
@@ -40,6 +40,7 @@ mod modular {
         }
     }
 
+    /// Returns the inverse in the additive group.
     impl<const N: Int> Neg for Modular<{ N }> {
         type Output = Self;
 
@@ -96,9 +97,38 @@ mod modular {
             self.0 == other.0
         }
     }
+
+    #[macro_export]
+    macro_rules! modulo {
+        ($value:expr ; $modulus:ident) => {
+            crate::modular::Modular::<$modulus>::new($value)
+        };
+        ($value:expr ; $modulus:literal) => {
+            crate::modular::Modular::<$modulus>::new($value)
+        };
+    }
+}
+
+mod utils {
+    use super::Int;
+
+    pub const fn bit_len(n: Int) -> u32 {
+        let int_size = Int::max_value().count_ones();
+        int_size - n.leading_zeros()
+    }
+
+    #[test]
+    fn bit_len_ok() {
+        assert_eq!(bit_len(0), 0);
+        assert_eq!(bit_len(1), 1);
+        assert_eq!(bit_len(2), 2);
+        assert_eq!(bit_len(3), 2);
+        assert_eq!(bit_len(4), 3);
+    }
 }
 
 mod primes {
+    use super::utils::bit_len;
     use super::Int;
 
     /// Checks that all values less than or equal to `inf`, other than 1, are
@@ -134,20 +164,6 @@ mod primes {
         // But this should pass for composite numbers on values less than their
         // least divisor
         assert!(inferior_values_coprime(35, 4));
-    }
-
-    const fn bit_len(n: Int) -> u32 {
-        let int_size = Int::max_value().count_ones();
-        int_size - n.leading_zeros()
-    }
-
-    #[test]
-    fn bit_len_ok() {
-        assert_eq!(bit_len(0), 0);
-        assert_eq!(bit_len(1), 1);
-        assert_eq!(bit_len(2), 2);
-        assert_eq!(bit_len(3), 2);
-        assert_eq!(bit_len(4), 3);
     }
 
     /// A compile=time primality checker. This users a naive and inefficient
@@ -197,72 +213,69 @@ mod primes {
 
 #[cfg(test)]
 mod tests {
-    use super::modular::Modular;
+    use super::modulo;
     use super::Int;
 
-    const MODULUS: Int = 7;
+    const N: Int = 7;
 
     #[test]
     fn residue_class_equality() {
-        for v in 0..MODULUS {
-            let m = Modular::<MODULUS>::new(v);
+        for v in 0..N {
+            let m = modulo![v; N];
             for n in 0..=4 {
-                assert_eq!(m, Modular::<MODULUS>::new(v + n * MODULUS));
+                assert_eq!(m, modulo![v + n * N; N]);
             }
         }
     }
 
     #[test]
     fn neg_ok() {
-        for v in 0..MODULUS {
-            let m = Modular::<MODULUS>::new(v);
-            assert_eq!(-m, Modular::<MODULUS>::new(MODULUS - v));
+        for v in 0..N {
+            let m = modulo![v; N];
+            assert_eq!(-m, modulo![N - v; N]);
         }
     }
 
     #[test]
     fn add_ok() {
-        for v1 in 0..MODULUS {
-            for v2 in 0..MODULUS {
-                let m1 = Modular::<MODULUS>::new(v1);
-                let m2 = Modular::<MODULUS>::new(v2);
-                assert_eq!(m1 + m2, Modular::<MODULUS>::new(v1 + v2));
+        for v1 in 0..N {
+            for v2 in 0..N {
+                let m1 = modulo![v1; N];
+                let m2 = modulo![v2; N];
+                assert_eq!(m1 + m2, modulo![v1 + v2; N]);
             }
         }
     }
 
     #[test]
     fn mul_ok() {
-        for v1 in 0..MODULUS {
-            for v2 in 0..MODULUS {
-                let m1 = Modular::<MODULUS>::new(v1);
-                let m2 = Modular::<MODULUS>::new(v2);
-                assert_eq!(m1 * m2, Modular::<MODULUS>::new(v1 * v2));
+        for v1 in 0..N {
+            for v2 in 0..N {
+                let m1 = modulo![v1; N];
+                let m2 = modulo![v2; N];
+                assert_eq!(m1 * m2, modulo![v1 * v2; N]);
             }
         }
     }
 
     #[test]
     fn sub_ok() {
-        for v1 in 0..MODULUS {
-            for v2 in 0..MODULUS {
-                let m1 = Modular::<MODULUS>::new(v1);
-                let m2 = Modular::<MODULUS>::new(v2);
-                assert_eq!(
-                    m1 - m2,
-                    Modular::<MODULUS>::new(v1) + (-Modular::<MODULUS>::new(v2))
-                );
+        for v1 in 0..N {
+            for v2 in 0..N {
+                let m1 = modulo![v1; N];
+                let m2 = modulo![v2; N];
+                assert_eq!(m1 - m2, modulo![v1; N] + (-modulo![v2; N]));
             }
         }
     }
 
     #[test]
     fn div_ok() {
-        for v1 in 1..MODULUS {
-            for v2 in 1..MODULUS {
-                let m1 = Modular::<MODULUS>::new(v1);
-                let m2 = Modular::<MODULUS>::new(v2);
-                assert_eq!((m1 / m2) * m2, m1,);
+        for v1 in 1..N {
+            for v2 in 1..N {
+                let m1 = modulo![v1; N];
+                let m2 = modulo![v2; N];
+                assert_eq!((m1 / m2) * m2, m1);
             }
         }
     }
@@ -271,17 +284,17 @@ mod tests {
     #[should_panic]
     fn div_fail_composite() {
         const COMPOSITE: Int = 6;
-        let m1 = Modular::<COMPOSITE>::new(4);
-        let m2 = Modular::<COMPOSITE>::new(2);
+        let m1 = modulo![4; COMPOSITE];
+        let m2 = modulo![2; COMPOSITE];
         let _m = m1 / m2;
     }
 
     #[test]
     fn pow_ok() {
-        for v in 0..=MODULUS {
+        for v in 0..=N {
             for exp in 0..=10 {
-                let m = Modular::<MODULUS>::new(v);
-                assert_eq!(m.pow(exp), Modular::<MODULUS>::new(v.pow(exp)));
+                let m = modulo![v; N];
+                assert_eq!(m.pow(exp), modulo![v.pow(exp); N]);
             }
         }
     }
