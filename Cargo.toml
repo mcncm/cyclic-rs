@@ -1,0 +1,14 @@
+[package]
+name = "modular-arithmetic"
+version = "0.1.0"
+authors = ["mcncm <mcnallychristopherm@gmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dev-dependencies.cargo-husky]
+version = "1"
+default-features = false
+features = ["precommit-hook", "run-cargo-test", "run-cargo-clippy", "run-cargo-fmt"]
+
+[dependencies]
