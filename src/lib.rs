@@ -3,20 +3,71 @@
 #![feature(const_fn)]
 #![feature(const_if_match)]
 
-pub type Int = u32;
+//! Simple library for generic cyclic groups, rings of integers, and prime
+//! fields. Rather than providing single operations like modular exponentiation
+//! or modular division, Cyclic provides type-safe ring-valued integers that
+//! work the way you expect.
+//!
+//! Because of its reliance on const generics and compile-time computing
+//! for primality checking, Cyclic currently only builds with the nightly
+//! toolchain.
+//!
+//! # Examples
+//!
+//! Using Cyclic is easy: the crate provides a macro, `res!`, that takes an
+//! unsigned integer and produces its residue class.
+//!
+//! ```ignore,
+//! use cyclic::res;
+//! const N: u32 = 7;
+//!
+//! let r = res![3; N];
+//! assert_eq!(r.0, 3);
+//!
+//! let s = res![11; N];
+//! assert_eq!(r.0, 4);
+//!
+//! assert_eq!(r + s, res![0; N]);
+//! assert_eq!(r - s, res![6; N]);
+//! assert_eq!(r * s, res![5; N]);
+//! assert_eq!(r / s, res![6; N]);
+//!
+//! assert_eq!(res![2,3].pow(1_000_000), res![1; 3])
+//! ```
+//!
+//! The following code, on the other hand, will fail to compile:
+//!
+//! ```ignore,
+//! let r = res![1; 6] + res![4; 12];
+//! ```
+//!
+//! # Panics
+//!
+//! Attempted division in a ring of composite order will panic:
+//!
+//! ```ignore
+//! let r = res![2; 4] / res![3; 4];
+//! ```
+//!
+//! The primality of the modulus is checked at compile time, so this incurs no
+//! runtime cost.
+//!
+//! # TODO
+//!
+//! There are a number of improvements I would like to make to this crate:
+//!
+//! - Use Montgomery multiplication for large products
+//!
+//! - Compile-time error for attempted division in a composite-order ring. I
+//!   consider this change pretty important, but it's waiting on some const
+//!   generic features that don't exist yet.
+//!
+//! - Possible feature flags for different algorithms
+//!
+//! - Currently, `Modular` type is generic over the modulus, but not the integer
+//!   type, which is constrained to be `u32`. This is a critical feature that I'll be adding soon.
 
-/// TODO: here are some behaviors I would like.
-///
-/// * Implementations should depend on magnitude of N, and be determined at
-///   compile time. For example there may be extra care taken with respect to
-///   wrapping for large-enough `N`, and small exponentials might be best
-///   implemented by repeated multiplication.
-///
-/// * Wrapping ranges should be added (This doesn't seem to be possible using
-///   the built-in `std::ops::Range`, which expects a type implementing
-///   `PartialOrd`)
-///
-/// * Study optimizations from theory of finite groups, and apply some of them!
+type Int = u32;
 
 pub mod modular {
     use super::primes::is_prime;
@@ -26,7 +77,17 @@ pub mod modular {
     use std::ops;
 
     #[derive(Debug, Clone, Copy)]
-    pub struct Modular<const N: Int>(Int);
+    pub struct Modular<const N: Int>(pub Int);
+
+    #[macro_export]
+    macro_rules! res {
+        ($value:expr ; $modulus:ident) => {
+            $crate::modular::Modular::<$modulus>::new($value)
+        };
+        ($value:expr ; $modulus:literal) => {
+            $crate::modular::Modular::<$modulus>::new($value)
+        };
+    }
 
     impl<const N: Int> Modular<{ N }> {
         const PRIMALITY: bool = is_prime({ N });
@@ -45,11 +106,11 @@ pub mod modular {
         /// Raises `self` to the power of `expt`, using a native Modular
         /// implementation of the repeated-squaring algorithm.
         fn mod_pow(self, exp: u32) -> Self {
-            let mut acc = Self::new(0);
+            let mut acc = Self::new(1);
             let mut inc = self;
-            for n in 0..bit_len(self.0) {
+            for n in 0..bit_len(exp) {
                 if exp & (1 << n) != 0 {
-                    acc += inc
+                    acc *= inc
                 }
                 inc *= inc;
             }
@@ -62,6 +123,14 @@ pub mod modular {
             } else {
                 self.mod_pow(exp)
             }
+        }
+    }
+
+    #[test]
+    fn mod_pow_ok() {
+        let m = Modular::<7>::new(3);
+        for exp in 1..=7 {
+            assert_eq!(m.int_pow(exp), m.mod_pow(exp));
         }
     }
 
@@ -101,19 +170,41 @@ pub mod modular {
     /// Division for prime modulus. This currently panics for composite `N`; as
     /// const generics are stabilized I hope to promote this to a compile-time
     /// check with a `where is_prime({ N })` clause.
+    ///
+    /// Division is implemented with the extended Euclidean algorithm. There
+    /// *might* be cases where the naive exponentiation algorithm is slightly
+    /// faster; it might be worth feature-flagging this.
     impl<const N: Int> ops::Div for Modular<{ N }> {
         type Output = Self;
         fn div(self, other: Self) -> Self::Output {
             assert!(Self::PRIMALITY);
-            // Maximally naive implementation. Replace with the extended
-            // euclidean division algorithm.
-            let mut inv: Int = 1;
-            for n in 1..({ N }) {
-                if Self::new(other.0) * Self::new(n) == Self::new(1) {
-                    inv = n;
-                }
+            if other.0 == 0 {
+                panic!("attempt to divide by zero mod {}", { N });
             }
-            self * Self::new(inv)
+
+            let (mut quot_prev, mut rem_prev) = ({ N / other.0 }, { N % other.0 });
+            let mut acc_prev = res![0; N];
+
+            let mut acc = res![1; N];
+            let inv = match rem_prev {
+                0 => acc,
+                _ => {
+                    let (mut quot, mut rem) = (other.0 / rem_prev, other.0 % rem_prev);
+                    while rem != 0 {
+                        let acc_tmp = acc;
+                        acc = acc_prev - acc * res![quot_prev; N];
+                        acc_prev = acc_tmp;
+
+                        let (quot_tmp, rem_tmp) = (quot, rem);
+                        quot = rem_prev / rem;
+                        rem = rem_prev % rem;
+                        quot_prev = quot_tmp;
+                        rem_prev = rem_tmp;
+                    }
+                    acc_prev - acc * res![quot_prev; N]
+                }
+            };
+            self * inv
         }
     }
 
@@ -153,16 +244,6 @@ pub mod modular {
         fn from(n: Int) -> Self {
             Self::new(n)
         }
-    }
-
-    #[macro_export]
-    macro_rules! modulo {
-        ($value:expr ; $modulus:ident) => {
-            crate::modular::Modular::<$modulus>::new($value)
-        };
-        ($value:expr ; $modulus:literal) => {
-            crate::modular::Modular::<$modulus>::new($value)
-        };
     }
 }
 
@@ -270,7 +351,8 @@ mod primes {
 
 #[cfg(test)]
 mod tests {
-    use super::modulo;
+    use super::primes::is_prime;
+    use super::res;
     use super::Int;
 
     const N: Int = 7;
@@ -278,9 +360,9 @@ mod tests {
     #[test]
     fn residue_class_equality() {
         for v in 0..N {
-            let m = modulo![v; N];
+            let m = res![v; N];
             for n in 0..=4 {
-                assert_eq!(m, modulo![v + n * N; N]);
+                assert_eq!(m, res![v + n * N; N]);
             }
         }
     }
@@ -288,8 +370,8 @@ mod tests {
     #[test]
     fn neg_ok() {
         for v in 0..N {
-            let m = modulo![v; N];
-            assert_eq!(-m, modulo![N - v; N]);
+            let m = res![v; N];
+            assert_eq!(-m, res![N - v; N]);
         }
     }
 
@@ -297,9 +379,9 @@ mod tests {
     fn add_ok() {
         for v1 in 0..N {
             for v2 in 0..N {
-                let m1 = modulo![v1; N];
-                let m2 = modulo![v2; N];
-                assert_eq!(m1 + m2, modulo![v1 + v2; N]);
+                let m1 = res![v1; N];
+                let m2 = res![v2; N];
+                assert_eq!(m1 + m2, res![v1 + v2; N]);
             }
         }
     }
@@ -308,9 +390,9 @@ mod tests {
     fn mul_ok() {
         for v1 in 0..N {
             for v2 in 0..N {
-                let m1 = modulo![v1; N];
-                let m2 = modulo![v2; N];
-                assert_eq!(m1 * m2, modulo![v1 * v2; N]);
+                let m1 = res![v1; N];
+                let m2 = res![v2; N];
+                assert_eq!(m1 * m2, res![v1 * v2; N]);
             }
         }
     }
@@ -319,9 +401,9 @@ mod tests {
     fn sub_ok() {
         for v1 in 0..N {
             for v2 in 0..N {
-                let m1 = modulo![v1; N];
-                let m2 = modulo![v2; N];
-                assert_eq!(m1 - m2, modulo![v1; N] + (-modulo![v2; N]));
+                let m1 = res![v1; N];
+                let m2 = res![v2; N];
+                assert_eq!(m1 - m2, res![v1; N] + (-res![v2; N]));
             }
         }
     }
@@ -330,8 +412,8 @@ mod tests {
     fn div_ok() {
         for v1 in 1..N {
             for v2 in 1..N {
-                let m1 = modulo![v1; N];
-                let m2 = modulo![v2; N];
+                let m1 = res![v1; N];
+                let m2 = res![v2; N];
                 assert_eq!((m1 / m2) * m2, m1);
             }
         }
@@ -341,8 +423,8 @@ mod tests {
     #[should_panic]
     fn div_fail_composite() {
         const COMPOSITE: Int = 6;
-        let m1 = modulo![4; COMPOSITE];
-        let m2 = modulo![2; COMPOSITE];
+        let m1 = res![4; COMPOSITE];
+        let m2 = res![2; COMPOSITE];
         let _m = m1 / m2;
     }
 
@@ -350,9 +432,35 @@ mod tests {
     fn pow_ok() {
         for v in 0..=N {
             for exp in 0..=10 {
-                let m = modulo![v; N];
-                assert_eq!(m.pow(exp), modulo![v.pow(exp); N]);
+                let m = res![v; N];
+                assert_eq!(m.pow(exp), res![v.pow(exp); N]);
             }
+        }
+    }
+
+    #[test]
+    fn pow_cyclic_order() {
+        assert!(is_prime(N));
+        for v in 2..N {
+            let m = res![v; N];
+            assert_eq!(m.pow(N - 1), res![1; N]);
+        }
+    }
+
+    #[test]
+    fn big_pow_ok() {
+        const MODULUS: Int = 3;
+        const POW: u32 = 1_000_000;
+        let m = res![2; MODULUS];
+        for exp in POW..=(POW + 10) {
+            assert_eq!(
+                m.pow(exp),
+                if exp % 2 == 0 {
+                    res![1; MODULUS]
+                } else {
+                    res![2; MODULUS]
+                }
+            );
         }
     }
 }

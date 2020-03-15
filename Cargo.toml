@@ -1,5 +1,5 @@
 [package]
-name = "modular-arithmetic"
+name = "cyclic"
 version = "0.1.0"
 authors = ["mcncm <mcnallychristopherm@gmail.com>"]
 edition = "2018"
@@ -9,7 +9,6 @@ edition = "2018"
 [dev-dependencies.cargo-husky]
 version = "1"
 default-features = false
-features = []
-# features = ["precommit-hook", "run-cargo-test", "run-cargo-clippy", "run-cargo-fmt"]
+features = ["precommit-hook", "run-cargo-test", "run-cargo-clippy", "run-cargo-fmt"]
 
 [dependencies]
