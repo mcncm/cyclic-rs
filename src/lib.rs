@@ -17,17 +17,20 @@ pub type Int = u32;
 ///   `PartialOrd`)
 ///
 /// * Study optimizations from theory of finite groups, and apply some of them!
+
 pub mod modular {
     use super::primes::is_prime;
+    use super::utils::bit_len;
     use super::Int;
     use std::cmp::PartialEq;
-    use std::ops::{Add, Div, Mul, Neg, Sub};
+    use std::ops;
 
     #[derive(Debug, Clone, Copy)]
     pub struct Modular<const N: Int>(Int);
 
     impl<const N: Int> Modular<{ N }> {
         const PRIMALITY: bool = is_prime({ N });
+        const MAX_INT_POW: u32 = Int::max_value().count_ones() / bit_len({ N });
 
         pub fn new(val: Int) -> Self {
             Self { 0: val % { N } }
@@ -35,13 +38,35 @@ pub mod modular {
 
         /// Raises `self` to the power of `exp`, using the underlying integral
         /// type's `pow` method.
-        pub fn pow(self, exp: u32) -> Self {
+        fn int_pow(self, exp: u32) -> Self {
             Self::new(self.0.pow(exp))
+        }
+
+        /// Raises `self` to the power of `expt`, using a native Modular
+        /// implementation of the repeated-squaring algorithm.
+        fn mod_pow(self, exp: u32) -> Self {
+            let mut acc = Self::new(0);
+            let mut inc = self;
+            for n in 0..bit_len(self.0) {
+                if exp & (1 << n) != 0 {
+                    acc += inc
+                }
+                inc *= inc;
+            }
+            acc
+        }
+
+        pub fn pow(self, exp: u32) -> Self {
+            if exp <= Self::MAX_INT_POW {
+                self.int_pow(exp)
+            } else {
+                self.mod_pow(exp)
+            }
         }
     }
 
     /// Returns the inverse in the additive group.
-    impl<const N: Int> Neg for Modular<{ N }> {
+    impl<const N: Int> ops::Neg for Modular<{ N }> {
         type Output = Self;
 
         fn neg(self) -> Self::Output {
@@ -49,7 +74,7 @@ pub mod modular {
         }
     }
 
-    impl<const N: Int> Add for Modular<{ N }> {
+    impl<const N: Int> ops::Add for Modular<{ N }> {
         type Output = Self;
 
         fn add(self, other: Self) -> Self::Output {
@@ -57,7 +82,7 @@ pub mod modular {
         }
     }
 
-    impl<const N: Int> Mul for Modular<{ N }> {
+    impl<const N: Int> ops::Mul for Modular<{ N }> {
         type Output = Self;
 
         fn mul(self, other: Self) -> Self::Output {
@@ -65,7 +90,7 @@ pub mod modular {
         }
     }
 
-    impl<const N: Int> Sub for Modular<{ N }> {
+    impl<const N: Int> ops::Sub for Modular<{ N }> {
         type Output = Self;
 
         fn sub(self, other: Self) -> Self::Output {
@@ -73,10 +98,10 @@ pub mod modular {
         }
     }
 
-    /// Division for prime modulus. This currently fails at runtime for
-    /// composite `N`; as const generics are stabilized I hope to promote this
-    /// to a compile-time check with a `where is_prime({ N })` clause.
-    impl<const N: Int> Div for Modular<{ N }> {
+    /// Division for prime modulus. This currently panics for composite `N`; as
+    /// const generics are stabilized I hope to promote this to a compile-time
+    /// check with a `where is_prime({ N })` clause.
+    impl<const N: Int> ops::Div for Modular<{ N }> {
         type Output = Self;
         fn div(self, other: Self) -> Self::Output {
             assert!(Self::PRIMALITY);
@@ -92,9 +117,41 @@ pub mod modular {
         }
     }
 
+    // NOTE: is there a tiny performance cost from the indirection in my
+    // implementations of the `Assign` traits?
+    impl<const N: Int> ops::AddAssign for Modular<{ N }> {
+        fn add_assign(&mut self, other: Self) {
+            *self = *self + other
+        }
+    }
+
+    impl<const N: Int> ops::MulAssign for Modular<{ N }> {
+        fn mul_assign(&mut self, other: Self) {
+            *self = *self * other
+        }
+    }
+
+    impl<const N: Int> ops::SubAssign for Modular<{ N }> {
+        fn sub_assign(&mut self, other: Self) {
+            *self = *self - other
+        }
+    }
+
+    impl<const N: Int> ops::DivAssign for Modular<{ N }> {
+        fn div_assign(&mut self, other: Self) {
+            *self = *self / other
+        }
+    }
+
     impl<const N: Int> PartialEq for Modular<{ N }> {
         fn eq(&self, other: &Self) -> bool {
             self.0 == other.0
+        }
+    }
+
+    impl<const N: Int> From<Int> for Modular<{ N }> {
+        fn from(n: Int) -> Self {
+            Self::new(n)
         }
     }
 
