@@ -17,7 +17,7 @@
 //! Using Cyclic is easy: the crate provides a macro, `res!`, that takes an
 //! unsigned integer and produces its residue class.
 //!
-//! ```ignore,
+//! ```
 //! use cyclic::res;
 //! const N: u32 = 7;
 //!
@@ -25,47 +25,61 @@
 //! assert_eq!(r.0, 3);
 //!
 //! let s = res![11; N];
-//! assert_eq!(r.0, 4);
+//! assert_eq!(s.0, 4);
 //!
 //! assert_eq!(r + s, res![0; N]);
 //! assert_eq!(r - s, res![6; N]);
 //! assert_eq!(r * s, res![5; N]);
 //! assert_eq!(r / s, res![6; N]);
 //!
-//! assert_eq!(res![2,3].pow(1_000_000), res![1; 3])
+//! assert_eq!(res![2; 3].pow(1_000_000), res![1; 3])
 //! ```
 //!
 //! The following code, on the other hand, will fail to compile:
 //!
-//! ```ignore,
+//! ```compile_fail,E0308
+//! use cyclic::res;
 //! let r = res![1; 6] + res![4; 12];
 //! ```
 //!
-//! # Panics
-//!
 //! Attempted division in a ring of composite order will panic:
 //!
-//! ```ignore
+//! ```should_panic,
+//! use cyclic::res;
 //! let r = res![2; 4] / res![3; 4];
 //! ```
 //!
 //! The primality of the modulus is checked at compile time, so this incurs no
 //! runtime cost.
 //!
-//! # TODO
+//! # Crate Feature Flags
 //!
-//! There are a number of improvements I would like to make to this crate:
+//! - `composite_order_division`: enabling this feature suppresses panics when
+//!   dividing in a ring that is not of prime order. It becomes the programmer's
+//!   responsibility to remember that only elements relatively prime to the
+//!   modulus have well-defined inverses.
 //!
-//! - Use Montgomery multiplication for large products
+//! # Crate Status
+//!
+//! This crate is brand-new, and although it is "feature-complete" in a narrow
+//! sense, there are still things to be done.
+//!
+//! - The crate currently only builds on nightly.
+//! - Currently, the `Modular` type is generic over the modulus, but not the
+//!   integer type, which is constrained to be `u32`. This is the major remaining
+//!   omission, that I'll be correcting soon.
+//! - The crate should support `no_std`.
+//!
+//! There are a number of other improvements I would like to make to this crate:
+//!
+//! - Montgomery multiplication for large products
 //!
 //! - Compile-time error for attempted division in a composite-order ring. I
 //!   consider this change pretty important, but it's waiting on some const
 //!   generic features that don't exist yet.
 //!
-//! - Possible feature flags for different algorithms
+//! - Possible feature flags for different algorithms.
 //!
-//! - Currently, `Modular` type is generic over the modulus, but not the integer
-//!   type, which is constrained to be `u32`. This is a critical feature that I'll be adding soon.
 
 type Int = u32;
 
@@ -89,6 +103,28 @@ pub mod modular {
         };
     }
 
+    /// A ring type taking values in Z/nZ, for any positive n.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use cyclic::modular::Modular;
+    ///
+    /// const N: u32 = 6;
+    /// let r = Modular::<N>::new(2);
+    /// let s = Modular::<N>::new(3);
+    ///
+    /// assert_eq!((r * s).0, 0);
+    /// ```
+    ///
+    /// ```compile_fail,E0308
+    /// use cyclic::modular::Modular;
+    ///
+    /// let r = Modular::<3>::new(1);
+    /// let s = Modular::<4>::new(1);
+    ///
+    /// let absurd = r + s;
+    /// ```
     impl<const N: Int> Modular<{ N }> {
         const PRIMALITY: bool = is_prime({ N });
         const MAX_INT_POW: u32 = Int::max_value().count_ones() / bit_len({ N });
@@ -134,7 +170,7 @@ pub mod modular {
         }
     }
 
-    /// Returns the inverse in the additive group.
+    /// Returns the additive inverse of a ring element.
     impl<const N: Int> ops::Neg for Modular<{ N }> {
         type Output = Self;
 
@@ -143,6 +179,7 @@ pub mod modular {
         }
     }
 
+    /// Adds ring elements modulo `N`.
     impl<const N: Int> ops::Add for Modular<{ N }> {
         type Output = Self;
 
@@ -151,6 +188,7 @@ pub mod modular {
         }
     }
 
+    /// Multiplies ring elements modulo `N`.
     impl<const N: Int> ops::Mul for Modular<{ N }> {
         type Output = Self;
 
@@ -159,6 +197,7 @@ pub mod modular {
         }
     }
 
+    /// Subtracts ring elements modulo `N`.
     impl<const N: Int> ops::Sub for Modular<{ N }> {
         type Output = Self;
 
@@ -167,17 +206,24 @@ pub mod modular {
         }
     }
 
-    /// Division for prime modulus. This currently panics for composite `N`; as
-    /// const generics are stabilized I hope to promote this to a compile-time
-    /// check with a `where is_prime({ N })` clause.
+    /// Divides field elements modulo `N`.
     ///
     /// Division is implemented with the extended Euclidean algorithm. There
     /// *might* be cases where the naive exponentiation algorithm is slightly
     /// faster; it might be worth feature-flagging this.
+    ///
+    /// # Panics
+    ///
+    /// This currently panics for composite `N`; as const generics are
+    /// stabilized I hope to promote this to a compile-time check with a `where
+    /// is_prime({ N })` clause. This panic can be disabled by compiling with
+    /// the `composite_order_division` feature.
     impl<const N: Int> ops::Div for Modular<{ N }> {
         type Output = Self;
         fn div(self, other: Self) -> Self::Output {
-            assert!(Self::PRIMALITY);
+            if !cfg!(feature = "composite_order_division") {
+                assert!(Self::PRIMALITY);
+            }
             if other.0 == 0 {
                 panic!("attempt to divide by zero mod {}", { N });
             }
@@ -421,7 +467,14 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn div_fail_composite() {
+    fn div_zero_fail() {
+        let _m = res![4; N] / res![0; N];
+    }
+
+    #[cfg(not(feature = "composite_order_division"))]
+    #[test]
+    #[should_panic]
+    fn div_composite_fail() {
         const COMPOSITE: Int = 6;
         let m1 = res![4; COMPOSITE];
         let m2 = res![2; COMPOSITE];

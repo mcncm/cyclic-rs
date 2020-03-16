@@ -1,18 +1,24 @@
 [package]
 name = "cyclic"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["mcncm <mcnallychristopherm@gmail.com>"]
 edition = "2018"
 description = "Simple, complete, and dependency-free modular arithmetic"
+keywords = ["modular", "arithmetic", "cyclic", "group", "field"]
 license = "GPL-3.0"
-repository = "https://github.com/mcncm/cyclic"
+repository = "https://github.com/mcncm/cyclic-rs"
 readme = "README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = []
+composite_order_division = []
+
+[dependencies]
 
 [dev-dependencies.cargo-husky]
 version = "1"
 default-features = false
 features = ["precommit-hook", "run-cargo-test", "run-cargo-clippy", "run-cargo-fmt"]
 
-[dependencies]
