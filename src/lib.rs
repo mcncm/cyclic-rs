@@ -1,7 +1,6 @@
 #![allow(incomplete_features)]
 #![feature(const_generics)]
 #![feature(const_fn)]
-#![feature(const_if_match)]
 
 //! Simple library for generic cyclic groups, rings of integers, and prime
 //! fields. Rather than providing single operations like modular exponentiation
@@ -66,13 +65,14 @@
 //!
 //! - The crate currently only builds on nightly.
 //! - Currently, the `Modular` type is generic over the modulus, but not the
-//!   integer type, which is constrained to be `u32`. This is the major remaining
-//!   omission, that I'll be correcting soon.
+//!   integer type, which is constrained to be `u32`. This is due to an
+//!   unfortunate technical limitation of the current implementation of const
+//!   generics, which will hopefully be corrected one day.
 //! - The crate should support `no_std`.
 //!
 //! There are a number of other improvements I would like to make to this crate:
 //!
-//! - Montgomery multiplication for large products
+//! - Montgomery multiplication for large exponents
 //!
 //! - Compile-time error for attempted division in a composite-order ring. I
 //!   consider this change pretty important, but it's waiting on some const
@@ -125,9 +125,9 @@ pub mod modular {
     ///
     /// let absurd = r + s;
     /// ```
-    impl<const N: Int> Modular<{ N }> {
-        const PRIMALITY: bool = is_prime({ N });
-        const MAX_INT_POW: u32 = Int::max_value().count_ones() / bit_len({ N });
+    impl<const N: Int> Modular<N> {
+        const PRIMALITY: bool = is_prime(N);
+        const MAX_INT_POW: u32 = Int::max_value().count_ones() / bit_len(N);
 
         pub fn new(val: Int) -> Self {
             Self { 0: val % { N } }
@@ -317,7 +317,7 @@ mod primes {
 
     /// Checks that all values less than or equal to `inf`, other than 1, are
     /// coprime to `n`, and returns `true` if this is the case.
-    const fn inferior_values_coprime(n: Int, inf: Int) -> bool {
+    const fn inferior_values_indivisible(n: Int, inf: Int) -> bool {
         // This function is necessary--must be written in the following unusual
         // style--because of constraints imposed by `const fn` in the current
         // rustc release.
@@ -326,31 +326,34 @@ mod primes {
         // compile-time primality testing, it would be very nice if I could
         // optimize away some of these calls. It's likely that a better
         // algorithm could remove this burden.
+        //
+        // NOTE: this obtuse style should no longer be necessary as of Rust 1.46
+
         match inf {
             1 => true,
             _ => match n % inf {
                 0 => false,
-                _ => inferior_values_coprime(n, inf - 1),
+                _ => inferior_values_indivisible(n, inf - 1),
             },
         }
     }
 
     #[test]
-    fn inferior_values_coprime_ok() {
+    fn inferior_values_indivisible_ok() {
         // Primes should test coprime to all 1 < n < p
-        assert!(inferior_values_coprime(3, 2));
-        assert!(inferior_values_coprime(5, 4));
-        assert!(inferior_values_coprime(7, 6));
+        assert!(inferior_values_indivisible(3, 2));
+        assert!(inferior_values_indivisible(5, 4));
+        assert!(inferior_values_indivisible(7, 6));
 
         // Composites should not!
-        assert!(!inferior_values_coprime(6, 5));
+        assert!(!inferior_values_indivisible(6, 5));
 
         // But this should pass for composite numbers on values less than their
         // least divisor
-        assert!(inferior_values_coprime(35, 4));
+        assert!(inferior_values_indivisible(35, 4));
     }
 
-    /// A compile=time primality checker. This users a naive and inefficient
+    /// A compile-time primality checker. This users a naive and inefficient
     /// primality test that checks divisbility by all integer values up to the
     /// square root of N.
     pub const fn is_prime(n: Int) -> bool {
@@ -358,6 +361,8 @@ mod primes {
         // of constraints imposed by `const fn` in the current rustc release.
         // Unfortunately, this means that `N` is limited by the default maximum
         // stack size.
+        //
+        // NOTE: this obtuse style should no longer be necessary as of Rust 1.46
         match n {
             0 | 1 => false,
             _ => {
@@ -366,7 +371,7 @@ mod primes {
                     true => n - 1,
                     false => bit_len_limit,
                 };
-                inferior_values_coprime(n, test_limit)
+                inferior_values_indivisible(n, test_limit)
             }
         }
     }

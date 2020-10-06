@@ -17,6 +17,13 @@ composite_order_division = []
 
 [dependencies]
 
+[dev-dependencies]
+criterion = "0.3"
+
+[[bench]]
+name = "arithmetic_perf"
+harness = false
+
 [dev-dependencies.cargo-husky]
 version = "1"
 default-features = false
